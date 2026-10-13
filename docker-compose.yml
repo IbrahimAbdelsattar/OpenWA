@@ -30,6 +30,27 @@ services:
       - 'com.openwa.service=database'
       - 'com.openwa.builtin=true'
 
+  # ===== Redis 7 Cache & WebSocket Pub/Sub =====
+  redis:
+    image: redis:7-alpine
+    container_name: openwa-redis
+    restart: unless-stopped
+    networks:
+      - openwa-network
+    security_opt:
+      - 'no-new-privileges:true'
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    labels:
+      - 'com.openwa.service=cache'
+      - 'com.openwa.builtin=true'
+
   # ===== OpenWA Backend API & React Dashboard =====
   openwa-api:
     build:
@@ -40,6 +61,8 @@ services:
     stop_grace_period: 75s
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - openwa-network
@@ -86,6 +109,11 @@ services:
       - POSTGRES_SCHEMA=${POSTGRES_SCHEMA:-public}
       - DATABASE_SYNCHRONIZE=false
 
+      # Redis Configuration
+      - REDIS_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
       # Engine Configuration
       - ENGINE_TYPE=${ENGINE_TYPE:-whatsapp-web.js}
       - SESSION_DATA_PATH=/app/data/sessions
@@ -123,6 +151,9 @@ volumes:
     driver: local
   postgres-data:
     name: openwa_postgres-data
+    driver: local
+  redis-data:
+    name: openwa_redis-data
     driver: local
 
 networks:
