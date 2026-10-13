@@ -43,6 +43,7 @@ services:
         condition: service_healthy
     networks:
       - openwa-network
+      - dokploy-network
     security_opt:
       - 'no-new-privileges:true'
     cap_drop:
@@ -108,6 +109,13 @@ services:
     labels:
       - 'com.openwa.service=api'
       - 'com.openwa.core=true'
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.openwa.rule=Host(`wa.trio-academy.tech`)'
+      - 'traefik.http.routers.openwa.entrypoints=websecure'
+      - 'traefik.http.routers.openwa.tls=true'
+      - 'traefik.http.routers.openwa.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.openwa.loadbalancer.server.port=2785'
+      - 'traefik.docker.network=dokploy-network'
 
 volumes:
   openwa-data:
@@ -120,3 +128,5 @@ volumes:
 networks:
   openwa-network:
     name: openwa-network
+  dokploy-network:
+    external: true
