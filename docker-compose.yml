@@ -138,12 +138,13 @@ services:
       - 'com.openwa.service=api'
       - 'com.openwa.core=true'
       - 'traefik.enable=true'
-      - 'traefik.http.routers.openwa.rule=Host(`wa.trio-academy.tech`)'
-      - 'traefik.http.routers.openwa.entrypoints=websecure'
-      - 'traefik.http.routers.openwa.tls=true'
-      - 'traefik.http.routers.openwa.tls.certresolver=letsencrypt'
-      - 'traefik.http.services.openwa.loadbalancer.server.port=2785'
       - 'traefik.docker.network=dokploy-network'
+      - 'traefik.http.routers.openwa-router.rule=Host(`wa.trio-academy.tech`)'
+      - 'traefik.http.routers.openwa-router.entrypoints=websecure'
+      - 'traefik.http.routers.openwa-router.tls=true'
+      - 'traefik.http.routers.openwa-router.tls.certresolver=letsencrypt'
+      - 'traefik.http.routers.openwa-router.service=openwa-service'
+      - 'traefik.http.services.openwa-service.loadbalancer.server.port=2785'
 
 volumes:
   openwa-data:
