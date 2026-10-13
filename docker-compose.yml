@@ -10,9 +10,12 @@ services:
       - openwa-network
     security_opt:
       - 'no-new-privileges:true'
+    env_file:
+      - path: .env
+        required: false
     environment:
       POSTGRES_USER: ${DATABASE_USERNAME:-openwa}
-            POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-openwa_super_secret_pass_2026}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-openwa_super_secret_pass_2026}
       POSTGRES_DB: ${DATABASE_NAME:-openwa}
       POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-public}
     volumes:
@@ -60,8 +63,11 @@ services:
       - '2785:2785'
     expose:
       - '2785'
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-production}
       - TZ=UTC
       - HOME=/tmp
       - XDG_CONFIG_HOME=/tmp/.config
@@ -70,17 +76,17 @@ services:
       - LOG_LEVEL=info
       
       # Database Configuration
-      - DATABASE_TYPE=postgres
-      - DATABASE_HOST=postgres
-      - DATABASE_PORT=5432
+      - DATABASE_TYPE=${DATABASE_TYPE:-postgres}
+      - DATABASE_HOST=${DATABASE_HOST:-postgres}
+      - DATABASE_PORT=${DATABASE_PORT:-5432}
       - DATABASE_NAME=${DATABASE_NAME:-openwa}
       - DATABASE_USERNAME=${DATABASE_USERNAME:-openwa}
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-openwa_super_secret_pass_2026}
       - POSTGRES_SCHEMA=${POSTGRES_SCHEMA:-public}
       - DATABASE_SYNCHRONIZE=false
 
       # Engine Configuration
-      - ENGINE_TYPE=whatsapp-web.js
+      - ENGINE_TYPE=${ENGINE_TYPE:-whatsapp-web.js}
       - SESSION_DATA_PATH=/app/data/sessions
       - PUPPETEER_HEADLESS=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/puppeteer-chrome
