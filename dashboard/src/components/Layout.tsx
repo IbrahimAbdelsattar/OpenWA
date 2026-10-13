@@ -135,6 +135,9 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   useEffect(() => {
     if (!isLanguageMenuOpen) return;
 
+    const activeEl = languageMenuRef.current?.querySelector('.language-menu-item.active');
+    activeEl?.scrollIntoView({ block: 'nearest' });
+
     const closeOnOutsideClick = (event: MouseEvent) => {
       if (!languageMenuRef.current?.contains(event.target as Node)) {
         setIsLanguageMenuOpen(false);
