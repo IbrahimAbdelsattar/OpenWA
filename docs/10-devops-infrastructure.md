@@ -51,7 +51,7 @@ RUN npm run build && npm run dashboard:ci -- --include=dev && npm run dashboard:
 # Production stage: runtime dependencies only, without install scripts; the dependency patchers
 # run in the same RUN, and any one failing fails the build.
 RUN npm ci --omit=dev --ignore-scripts \
-    && node scripts/patch-wwebjs-201832.js \
+    && node scripts/patch-wwebjs-newsletter-preview.js \
     # ... one `&& node scripts/patch-*.js \` line per patcher ...
     && npm cache clean --force
 
@@ -167,9 +167,9 @@ version: '3.8'
 services:
   app:
     image: ghcr.io/rmyndharis/openwa:latest
-    # Teardown takes up to 63 s with every datastore on; raise this by the amount SHUTDOWN_DELAY_MS or
+    # Teardown takes up to 75 s with every datastore on; raise this by the amount SHUTDOWN_DELAY_MS or
     # WEBHOOK_SHUTDOWN_DRAIN_MS exceeds its default, or Docker's 10 s default kills the container mid-teardown.
-    stop_grace_period: 75s
+    stop_grace_period: 90s
     deploy:
       replicas: 1
       resources:
@@ -1009,7 +1009,7 @@ export class MetricsService {
 | `openwa_ingress_dedup_body_mismatches_total` | counter   | none                                | Ingress requests with different body bytes under an existing delivery id since process start                                                                                                       |
 | `openwa_session_reconnect_attempts_total`    | counter   | —                                   | Reconnect attempts scheduled across all sessions since process start                                                                                                                               |
 | `openwa_session_reconnect_loop_alerts_total` | counter   | —                                   | Reconnect-loop alerts emitted since process start                                                                                                                                                  |
-| `openwa_sessions_restricted`                 | gauge     | —                                   | Sessions whose account WhatsApp is currently restricting                                                                                                                                           |
+| `openwa_sessions_restricted`                 | gauge     | —                                   | Sessions whose account WhatsApp is currently restricting; a passkey request counts until `ready`, a delete or a restart                                                                            |
 | `openwa_send_pacing_refusals_total`          | counter   | `reason`                            | Sends refused by the pacing governor since process start                                                                                                                                           |
 | `http_requests_total`                        | counter   | `method`, `route`, `status`         | API (`/api`) requests by method, route and status, refusals and preflights included (`(unmatched)`); `499` if the client left during handling, `408`/`503` for a dropped body; Bull Board excluded |
 | `http_request_duration_seconds`              | histogram | `method`, `route`                   | HTTP request duration (`_bucket` / `_sum` / `_count`)                                                                                                                                              |

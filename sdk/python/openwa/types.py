@@ -106,7 +106,7 @@ class CreateCallLinkRequest(TypedDict):
     """
 
     type: CallLinkType
-    startTime: float
+    startTime: int
 
 
 class CallLinkResponse(TypedDict):
@@ -238,11 +238,13 @@ class AccountRestriction(TypedDict):
     """A restriction WhatsApp has in force on a session's account.
 
     'reachout_timelock' leaves the session connected and existing chats working -- only starting new
-    conversations is blocked -- whereas 'tos_block' and 'proxy_block' refuse the connection itself
-    and therefore cannot coexist with a 'ready' status.
+    conversations is blocked -- whereas 'tos_block', 'proxy_block' and 'passkey_required' stop a link
+    or the connection itself and therefore cannot coexist with a 'ready' status. 'passkey_required'
+    means WhatsApp asked for a passkey to finish linking a device, which the Baileys engine cannot
+    answer.
     """
 
-    kind: Literal["reachout_timelock", "tos_block", "proxy_block"]
+    kind: Literal["reachout_timelock", "tos_block", "proxy_block", "passkey_required"]
     # The engine's own token for the cause, verbatim (TOS_BLOCK, BIZ_QUALITY, ...).
     code: str
     # ISO timestamp when enforcement ends, when WhatsApp states one.
@@ -292,13 +294,15 @@ class UpdateSessionProxyRequest(TypedDict, total=False):
 class SessionConfig(TypedDict):
     """A session's effective runtime configuration.
 
-    ``None`` on ``maxReconnectAttempts`` means unlimited -- not unset. ``autoRejectCalls`` works on
+    ``None`` on ``maxReconnectAttempts`` means unlimited -- not unset; ``None`` on ``linkPreview``
+    means the engine's own default. ``autoRejectCalls`` works on
     Baileys only: whatsapp-web.js stores the flag but cannot reject a call, so calls keep ringing there.
     """
 
     autoRejectCalls: bool
     maxReconnectAttempts: int | None
     reconnectBaseDelay: int
+    linkPreview: bool | None
 
 
 class UpdateSessionConfigRequest(TypedDict, total=False):
@@ -306,12 +310,15 @@ class UpdateSessionConfigRequest(TypedDict, total=False):
 
     Send ``None`` for ``maxReconnectAttempts`` to restore unlimited retries, which no in-range number
     can express. ``autoRejectCalls`` works on Baileys only: whatsapp-web.js stores the flag but cannot
-    reject a call, so calls keep ringing there.
+    reject a call, so calls keep ringing there. ``linkPreview`` is the preview of a send-text or
+    send-template that sets neither ``linkPreview`` nor ``customLinkPreview``; ``None`` restores the
+    engine's default.
     """
 
     autoRejectCalls: bool | None
     maxReconnectAttempts: int | None
     reconnectBaseDelay: int | None
+    linkPreview: bool | None
 
 
 class CreateSessionRequest(TypedDict):
@@ -348,7 +355,7 @@ class SessionStatsOverview(TypedDict):
     ready: int
     disconnected: int
     byStatus: dict[str, int]
-    memoryUsage: MemoryUsage
+    memoryUsage: NotRequired[MemoryUsage]
 
 
 # ── Message ───────────────────────────────────────────────────────
@@ -367,7 +374,8 @@ class SendTextRequest(TypedDict):
     mentions: NotRequired[list[str]]
     # Controls the URL preview. False suppresses it on both engines. Otherwise the engines differ:
     # whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN -- it needs
-    # True, because generating one is a blocking outbound fetch per URL.
+    # True, because generating one is a blocking outbound fetch of the first URL in the text. Unset,
+    # the session's linkPreview config applies when one is set (OpenWA 0.30.3 or later).
     linkPreview: NotRequired[bool]
     # Attach a preview you supply yourself instead of one fetched from the URL. The page is not
     # fetched, so this works even for a URL the gateway cannot reach; only thumbnailUrl, when given,
@@ -974,9 +982,9 @@ class UpdateWebhookRequest(TypedDict, total=False):
     # optional. Every field here is a partial update.
     url: str
     events: list[WebhookEvent]
-    # Same 16-character minimum as the create request, with one exception: the empty string is the
-    # documented "clear the secret" value and is accepted.
-    secret: str
+    # Same 16-character minimum as the create request, with one exception: the empty string, or None
+    # (sent as null), is the documented "clear the secret" value and is accepted.
+    secret: str | None
     headers: dict[str, str]
     filters: WebhookFilters | None
     # Total delivery attempts per event including the first, 0 to 5 (0 and 1 both mean one attempt);
@@ -1085,7 +1093,10 @@ class WebhookRedriveResult(TypedDict):
 
 class ChatSummary(TypedDict):
     id: Jid
+    # '' for a Baileys chat held under a privacy id that has no name of its own: title it by `phone`, when present.
     name: str
+    # Baileys only; whatsapp-web.js sends none. Phone digits of a privacy-id chat, when the session can map it.
+    phone: NotRequired[str]
     isGroup: bool
     unreadCount: int
     # Server returns a plain preview string, not a message object.

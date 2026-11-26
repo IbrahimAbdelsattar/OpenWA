@@ -1765,6 +1765,8 @@ func TestUpdateSessionConfigEmitsThreeStates(t *testing.T) {
 		{"a value sets it", UpdateSessionConfigRequest{MaxReconnectAttempts: Ptr(5)}, `{"maxReconnectAttempts":5}`},
 		{"clear sends explicit null", UpdateSessionConfigRequest{ClearMaxReconnectAttempts: true}, `{"maxReconnectAttempts":null}`},
 		{"clear wins over a value", UpdateSessionConfigRequest{MaxReconnectAttempts: Ptr(5), ClearMaxReconnectAttempts: true}, `{"maxReconnectAttempts":null}`},
+		{"a link preview default is sent", UpdateSessionConfigRequest{LinkPreview: Ptr(false)}, `{"linkPreview":false}`},
+		{"clearing the link preview sends null", UpdateSessionConfigRequest{ClearLinkPreview: true}, `{"linkPreview":null}`},
 	}
 	for _, c := range cases {
 		b, err := json.Marshal(c.req)
@@ -1996,7 +1998,7 @@ func TestDoSendsTheMethodInUpperCase(t *testing.T) {
 func TestSendIdempotencyKey(t *testing.T) {
 	rt := &recordTransport{status: 200, body: `{"messageId":"m","timestamp":1}`}
 	c := newTestClient(t, rt, WithHeader("idempotency-key", "default"))
-	for _, segment := range []string{"send-text", "send-image", "send-video", "send-audio", "send-document", "send-sticker", "send-location", "send-contact", "send-template", "send-poll", "reply", "forward"} {
+	for _, segment := range []string{"send-text", "send-image", "send-video", "send-audio", "send-document", "send-sticker", "send-location", "send-contact", "send-template", "send-poll", "reply", "click-button", "forward"} {
 		ctx := WithIdempotencyKey(context.Background(), segment)
 		if _, err := c.Messages.send(ctx, "s", segment, map[string]string{"chatId": "x"}); err != nil {
 			t.Fatal(err)
@@ -2418,5 +2420,27 @@ func TestRetryPreservesResponseBodyTimeout(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSessionStatsOverviewOptionalMemoryUsage(t *testing.T) {
+	rt := &recordTransport{status: 200, body: `{"total":2,"active":1,"ready":1,"disconnected":1,"byStatus":{"ready":1,"disconnected":1}}`}
+	c := newTestClient(t, rt)
+
+	stats, err := c.Sessions.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MemoryUsage != nil {
+		t.Fatalf("expected nil MemoryUsage when omitted, got %+v", stats.MemoryUsage)
+	}
+
+	rt.body = `{"total":2,"active":1,"ready":1,"disconnected":1,"byStatus":{"ready":1},"memoryUsage":{"heapUsed":12,"heapTotal":24,"rss":64}}`
+	adminStats, err := c.Sessions.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adminStats.MemoryUsage == nil || adminStats.MemoryUsage.RSS != 64 {
+		t.Fatalf("expected populated MemoryUsage, got %+v", adminStats.MemoryUsage)
 	}
 }

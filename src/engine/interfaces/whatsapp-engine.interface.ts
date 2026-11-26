@@ -602,7 +602,18 @@ export interface PaginatedProducts {
  */
 export interface ChatSummary {
   id: string;
+  /**
+   * The chat's name. `''` for a Baileys chat held under a privacy id (`@lid`) that has no name of its own:
+   * title it by `phone`, when present.
+   */
   name: string;
+  /**
+   * Baileys only: its store fills it in, and the whatsapp-web.js adapter never does (it lists a chat the page gives
+   * no title under its own id, as `name`). Phone digits of a 1:1 chat WhatsApp holds under a privacy id (`@lid`),
+   * when this session can map it. Absent for a phone-keyed chat (the number is the id) and when the mapping is
+   * unknown. The digits are not a display name: an unnamed chat is titled from them, and a saved name still wins.
+   */
+  phone?: string;
   isGroup: boolean;
   /** User-facing chat kind. `isGroup` is retained for back-compat; `kind` is the full discriminator. */
   kind: ChatKind;
@@ -751,11 +762,13 @@ export interface PollVoteEvent {
   /** Neutral id of the voter (the account itself when it voted from its phone). */
   voterId: string;
   /**
-   * The option texts now selected, exactly as they appear on the poll (the same strings `vote-poll`
-   * takes). An option the engine could not name is left out.
+   * The option texts now selected, capped to 32 options of 1024 characters like poll creation options
+   * (the same strings `vote-poll` takes when within WhatsApp's limits). Baileys drops the whole vote
+   * when any option hash does not match the poll; whatsapp-web.js omits individual unnamed options and
+   * skips a non-empty vote only when none can be named.
    */
   selectedOptions: string[];
-  /** The poll's question, when the creation message is available to read it from. */
+  /** The poll's question, when the creation message is available (truncated to 1024 characters). */
   pollName?: string;
   /** Unix seconds the voter changed the selection (sender clock). */
   timestamp: number;
@@ -777,7 +790,7 @@ export interface PollVoteEvent {
  *    (action 'created' only — the wwebjs event has no revoke/reject counterpart, so only
  *    the shared signal is surfaced; rc14 itself emits the event only for non-admin-add
  *    requests — the direct self-request stub 144 is unhandled upstream, marked TODO at
- *    Utils/process-message.js:569 — so an invite-link self-request may not fire on Baileys).
+ *    Utils/process-message.js — so an invite-link self-request may not fire on Baileys).
  * All ids are in the neutral dialect (`@g.us` / `@c.us`; a lid stays `<id>@lid` when the
  * lid->phone mapping is unknown).
  */
@@ -828,13 +841,17 @@ export interface IncomingCallEvent {
  *  - `tos_block` / `proxy_block` (whatsapp-web.js) — a connection-level refusal: WhatsApp Web drops
  *    the socket and the engine cannot stay linked at all. Derived from the `WAState` the library
  *    reports on its `disconnected` event, which is the only channel that carries it.
+ *  - `passkey_required` (Baileys): WhatsApp wants a passkey (a WebAuthn assertion) before it completes
+ *    a link, and the engine cannot produce one, so the link never completes. Reported when the
+ *    `passkey_prologue_request` notification arrives, which happens after the scan or the pairing code
+ *    and before any status change: the session keeps showing its QR.
  *
  * That difference is load-bearing for clearing: a `reachout_timelock` can only be resolved by an
  * explicit lift signal, whereas a connection-scoped kind is disproved the moment the session reaches
  * READY again — the block would have prevented that.
  */
 export interface AccountRestriction {
-  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block' | 'passkey_required';
   /**
    * The engine's own token for the cause, kept verbatim so an operator can search for it and so a
    * new upstream value is surfaced rather than flattened: the `WAState` string on whatsapp-web.js
@@ -969,6 +986,31 @@ export interface InboundReceipt {
   settled: Promise<InboundOutcome | undefined>;
 }
 
+/**
+ * How far a connection had got when it closed. The close code alone does not say: a `428` is what a
+ * session waiting for its QR, a login WhatsApp never answered and a session that had been open for a
+ * day all report.
+ * - `connecting`: the connection to WhatsApp never opened: no network, a failing proxy, a refused upgrade or
+ *   the connecting deadline. Nothing was exchanged, so it says nothing about the login.
+ * - `registration`: no device is linked; the connection was waiting for a QR scan or a pairing code.
+ * - `linked`: the link was accepted on this connection. WhatsApp then asks for a restart (close 515).
+ * - `login_unconfirmed`: the connection opened, a linked device's login was sent and WhatsApp had not confirmed it.
+ * - `login_confirmed`: WhatsApp confirmed the login and the session had not opened yet. In between the
+ *   engine stores and uploads its pre-keys and activates the connection.
+ * - `open`: the session was open.
+ */
+export type ConnectionCloseStage =
+  'connecting' | 'registration' | 'linked' | 'login_unconfirmed' | 'login_confirmed' | 'open';
+
+/** What the engine knows about the connection whose close a reconnect attempt follows. */
+export interface ReconnectContext {
+  stage: ConnectionCloseStage;
+  /** The close's status code, when it carried one. */
+  statusCode?: number;
+  /** How long the closed connection had existed, in milliseconds. */
+  aliveMs: number;
+}
+
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
@@ -1043,7 +1085,7 @@ export interface EngineEventCallbacks {
   onEventResponse?: (event: EventResponseEvent) => void;
   /**
    * Fired each time a voter changes their selection on a poll (consumers emit `poll.vote`).
-   * whatsapp-web.js only: Baileys never fires it.
+   * Baileys requires the poll creation message (and its secret) to remain in the session message store.
    */
   onPollVote?: (event: PollVoteEvent) => void;
   /**
@@ -1082,11 +1124,13 @@ export interface EngineEventCallbacks {
    * needs to tell a one-second blip from a session that has been down for an hour, which the status
    * alone cannot: the engine reports INITIALIZING for the whole episode, exactly as it does for a
    * session that has never been paired.
+   * `context` describes the connection whose close led to this attempt. It is absent when the attempt
+   * follows a connect that failed before a connection existed.
    *
    * Optional: an engine that hands every drop to its consumer instead of retrying internally
    * (whatsapp-web.js does) simply never invokes this, because that consumer already has the drop.
    */
-  onReconnecting?: (attempt: number, nextDelayMs: number) => void;
+  onReconnecting?: (attempt: number, nextDelayMs: number, context?: ReconnectContext) => void;
   onStateChanged?: (state: EngineStatus) => void;
   /**
    * Fired when the engine needs an operator action to keep the session healthy — currently only the
@@ -1238,7 +1282,8 @@ export interface MessagingCapability {
    *
    * `linkPreview: false` suppresses the URL preview on BOTH engines. Otherwise the two differ:
    * whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN — only
-   * `linkPreview: true` produces one, because generating it is a blocking outbound fetch per URL.
+   * `linkPreview: true` produces one, because generating it is a blocking outbound fetch of the
+   * first URL in the text.
    */
   sendTextMessage(
     chatId: string,
@@ -1314,7 +1359,7 @@ export interface MessageOperationsCapability {
 
   /**
    * Cast a vote on a poll. `options` are the option TEXTS, not ids: whatsapp-web.js matches by name
-   * (`Message.js:1027-1031`), and no engine surfaces a stable per-option id through this interface,
+   * (`Message.js`), and no engine surfaces a stable per-option id through this interface,
    * so a caller has nothing else to name an option by. Pass every option that should end up
    * selected — the list replaces the current selection rather than adding to it, and an empty array
    * clears the vote.
@@ -1577,13 +1622,13 @@ export interface ProfileCapability {
   setProfilePicture(media: MediaInput): Promise<void>;
 
   /**
-   * Remove the account's own profile picture. Resolves when the removal is acknowledged; deleting a
-   * picture that is not there is a no-op rather than an error, so the call is idempotent.
+   * Remove the account's own profile picture. Resolves when the removal is acknowledged. Every call
+   * sends the request, so a repeat answers what WhatsApp answers: the removal of an absent picture is
+   * observed to succeed for a group, and not yet for an account's own.
    *
-   * Only whatsapp-web.js can report a refusal, and only as an explicit `false` — its page helper
-   * also returns `undefined` when it did not attempt the delete at all, which is NOT a refusal.
-   * Baileys resolves void and has no refusal signal, so it reports success for any acknowledged
-   * write.
+   * whatsapp-web.js sends it in the page and answers by WhatsApp's status: a refusal, a rate limit or
+   * a server error (retryable), or no job to send it with on that WhatsApp Web build. Baileys
+   * resolves void and has no refusal signal, so it reports success for any acknowledged write.
    */
   deleteProfilePicture(): Promise<void>;
 }
@@ -1748,6 +1793,11 @@ export interface ChatCapability {
    *
    * `authors` maps a message id to who posted it, for a group: a receipt names its sender, and an id the
    * engine never kept (history backfill) has no key to read it from. An id with neither is not acknowledged.
+   *
+   * Once a receipt that names the chat's newest received message is out, Baileys resets the unread count
+   * it lists the chat with, and undoes an unread mark set by hand. The answer reports the receipt alone: a
+   * mark WhatsApp refuses or does not confirm is logged, and a chat with no message to key the write to
+   * keeps its mark without a log line.
    */
   sendSeen(
     chatId: string,
